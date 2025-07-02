@@ -1,0 +1,97 @@
+groups:
+  - name: database_automation_alerts
+    rules:
+      # Database Health Alerts
+      - alert: DatabaseDown
+        expr: db_health_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Database {{ $labels.database }} is down"
+          description: "Database {{ $labels.database }} has been down for more than 2 minutes"
+
+      - alert: HighDatabaseConnections
+        expr: db_connections_total > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High database connections on {{ $labels.database }}"
+          description: "Database {{ $labels.database }} has {{ $value }} connections, which is above the threshold"
+
+      # Query Performance Alerts
+      - alert: SlowQueries
+        expr: histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Slow queries detected on {{ $labels.database }}"
+          description: "95th percentile query duration is {{ $value }}s on database {{ $labels.database }}"
+
+      - alert: VerySlowQueries
+        expr: histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) > 30
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Very slow queries detected on {{ $labels.database }}"
+          description: "95th percentile query duration is {{ $value }}s on database {{ $labels.database }}"
+
+      # Backup Alerts
+      - alert: BackupFailure
+        expr: increase(db_backups_total{status="failed"}[24h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: "Backup failure on {{ $labels.database }}"
+          description: "Database backup failed for {{ $labels.database }} in the last 24 hours"
+
+      - alert: NoRecentBackup
+        expr: time() - db_backups_total{status="success"} > 86400
+        for: 1h
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: "No recent backup for {{ $labels.database }}"
+          description: "No successful backup found for {{ $labels.database }} in the last 24 hours"
+
+      - alert: LargeBackupSize
+        expr: db_backup_size_bytes > 10737418240  # 10GB
+        for: 5m
+        labels:
+          severity: warning
+          service: backup
+        annotations:
+          summary: "Large backup size for {{ $labels.database }}"
+          description: "Backup size for {{ $labels.database }} is {{ $value | humanize1024 }}B"
+
+      # System Resource Alerts
+      - alert: HighQueryVolume
+        expr: rate(db_query_duration_seconds_count[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High query volume on {{ $labels.database }}"
+          description: "Query rate is {{ $value }} queries/second on database {{ $labels.database }}"
+
+      # Connection Pool Alerts
+      - alert: ConnectionPoolExhaustion
+        expr: rate(db_connections_total{status="failed"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Connection pool exhaustion on {{ $labels.database }}"
+          description: "High rate of failed connections on database {{ $labels.database }}"

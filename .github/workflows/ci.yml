@@ -1,0 +1,377 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: "3.11"
+  POSTGRES_VERSION: "15"
+
+jobs:
+  # Code Quality and Security Checks
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Security
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install black flake8 mypy bandit safety
+        
+    - name: Code formatting check (Black)
+      run: black --check --diff database_automation.py tests/
+      
+    - name: Linting (Flake8)
+      run: flake8 database_automation.py tests/ --max-line-length=100 --ignore=E203,W503
+      
+    - name: Type checking (MyPy)
+      run: mypy database_automation.py --ignore-missing-imports
+      
+    - name: Security scan (Bandit)
+      run: bandit -r database_automation.py -f json -o bandit-report.json
+      continue-on-error: true
+      
+    - name: Dependency security check (Safety)
+      run: safety check --json --output safety-report.json
+      continue-on-error: true
+      
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Unit and Integration Tests
+  test:
+    runs-on: ubuntu-latest
+    name: Tests (Python ${{ matrix.python-version }})
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_automation
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+          
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-xdist pytest-html
+        
+    - name: Setup test database
+      env:
+        PGPASSWORD: test_password
+      run: |
+        psql -h localhost -U test_user -d test_automation -f scripts/init-postgres.sql
+        
+    - name: Run unit tests
+      env:
+        POSTGRES_PASSWORD: test_password
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_automation
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+      run: |
+        pytest tests/ -v --tb=short --cov=database_automation --cov-report=xml --cov-report=html --html=pytest-report.html --self-contained-html -x
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          pytest-report.html
+          htmlcov/
+          coverage.xml
+          
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == env.PYTHON_VERSION
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  # Docker Build and Test
+  docker:
+    runs-on: ubuntu-latest
+    name: Docker Build & Test
+    needs: [code-quality, test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKER_USERNAME }}/database-automation
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          VERSION=${{ steps.meta.outputs.version }}
+          VCS_REF=${{ github.sha }}
+          
+    - name: Test Docker image
+      run: |
+        docker run --rm ${{ secrets.DOCKER_USERNAME }}/database-automation:latest python database_automation.py --help
+
+  # Security Scanning
+  security:
+    runs-on: ubuntu-latest
+    name: Security Scanning
+    needs: [docker]
+    if: github.event_name != 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ secrets.DOCKER_USERNAME }}/database-automation:latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Performance Testing
+  performance:
+    runs-on: ubuntu-latest
+    name: Performance Testing
+    needs: [test]
+    if: github.ref == 'refs/heads/main'
+    
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_automation
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install locust
+        
+    - name: Setup test database
+      env:
+        PGPASSWORD: test_password
+      run: |
+        psql -h localhost -U test_user -d test_automation -f scripts/init-postgres.sql
+        
+    - name: Run performance tests
+      env:
+        POSTGRES_PASSWORD: test_password
+        POSTGRES_USER: test_user
+        POSTGRES_DB: test_automation
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: 5432
+      run: |
+        # Create performance test script
+        cat > performance_test.py << 'EOF'
+        import time
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from database_automation import DatabaseAutomation
+        
+        def test_health_check_performance():
+            automation = DatabaseAutomation('db_config.yaml')
+            start_time = time.time()
+            
+            for i in range(10):
+                result = automation.monitor_database_health('postgres_primary')
+                assert result['status'] in ['healthy', 'degraded']
+                
+            duration = time.time() - start_time
+            print(f"10 health checks completed in {duration:.2f} seconds")
+            assert duration < 30, f"Performance test failed: {duration:.2f}s > 30s"
+            
+        if __name__ == "__main__":
+            test_health_check_performance()
+            print("Performance tests passed!")
+        EOF
+        
+        python performance_test.py
+
+  # Deployment to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [docker, security, performance]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    
+    steps:
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
+        echo "Image: ${{ secrets.DOCKER_USERNAME }}/database-automation:develop"
+        # Add actual deployment steps here
+        
+  # Deployment to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [docker, security, performance]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    
+    steps:
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        echo "Tag: ${{ github.ref_name }}"
+        echo "Image: ${{ secrets.DOCKER_USERNAME }}/database-automation:${{ github.ref_name }}"
+        # Add actual deployment steps here
+
+  # Create GitHub Release
+  release:
+    runs-on: ubuntu-latest
+    name: Create Release
+    needs: [deploy-production]
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        body: |
+          ## Changes in this Release
+          
+          ### Features
+          - Enhanced database automation capabilities
+          - Improved monitoring and alerting
+          - Updated security features
+          
+          ### Bug Fixes
+          - Various stability improvements
+          
+          ### Docker Image
+          ```bash
+          docker pull ${{ secrets.DOCKER_USERNAME }}/database-automation:${{ github.ref_name }}
+          ```
+          
+          See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+        draft: false
+        prerelease: false

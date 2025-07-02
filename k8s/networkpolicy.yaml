@@ -1,0 +1,137 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-automation-netpol
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: database-automation
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  # Allow Prometheus to scrape metrics
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  # Allow ingress controller access
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  # Allow internal service communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: database-automation-suite
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow database connections
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: database
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 1433  # SQL Server
+  
+  # Allow external database connections (if databases are external)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 1433
+  
+  # Allow SMTP connections for email alerts
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 25
+    - protocol: TCP
+      port: 587
+    - protocol: TCP
+      port: 465
+  
+  # Allow HTTPS for external APIs (S3, monitoring, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  
+  # Allow HTTP for health checks and APIs
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+
+---
+# Network policy for database namespace communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-automation-db-access
+  namespace: database
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres  # Adjust based on your database labels
+  policyTypes:
+  - Ingress
+  
+  ingress:
+  # Allow database automation to connect to databases
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: database-automation
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: database-automation
+    ports:
+    - protocol: TCP
+      port: 5432
+  
+  # Allow monitoring tools to connect
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 5432

@@ -1,0 +1,311 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database-automation
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: database-automation-suite
+    app.kubernetes.io/version: "2.0.0"
+    app.kubernetes.io/managed-by: kubernetes
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: database-automation
+      app.kubernetes.io/component: automation
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: database-automation
+        app.kubernetes.io/component: automation
+        app.kubernetes.io/part-of: database-automation-suite
+        app.kubernetes.io/version: "2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+        config.linkerd.io/proxy-cpu-request: "0.1"
+        config.linkerd.io/proxy-memory-request: "20Mi"
+    spec:
+      serviceAccountName: database-automation
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      initContainers:
+      - name: config-init
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          set -e
+          echo "Initializing configuration..."
+          
+          # Create directories
+          mkdir -p /app/logs /app/reports /var/backups
+          
+          # Set permissions
+          chown -R 1000:1000 /app/logs /app/reports /var/backups
+          chmod 755 /app/logs /app/reports /var/backups
+          
+          echo "Configuration initialization completed"
+        volumeMounts:
+        - name: logs-storage
+          mountPath: /app/logs
+        - name: reports-storage
+          mountPath: /app/reports
+        - name: backup-storage
+          mountPath: /var/backups
+        securityContext:
+          runAsUser: 0
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+      
+      containers:
+      - name: database-automation
+        image: your-registry/database-automation:2.0.0
+        imagePullPolicy: IfNotPresent
+        
+        command: ["python", "database_automation.py"]
+        args: ["monitor", "--metrics-port", "8000"]
+        
+        ports:
+        - name: metrics
+          containerPort: 8000
+          protocol: TCP
+        
+        env:
+        - name: PYTHONPATH
+          valueFrom:
+            configMapKeyRef:
+              name: database-automation-config
+              key: PYTHONPATH
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: database-automation-config
+              key: LOG_LEVEL
+        - name: METRICS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: database-automation-config
+              key: METRICS_PORT
+        
+        # Database configuration
+        - name: POSTGRES_HOST
+          value: "postgres-primary.database.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "production_db"
+        - name: POSTGRES_USER
+          value: "automation_user"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: POSTGRES_PASSWORD
+        
+        - name: POSTGRES_REPLICA_HOST
+          value: "postgres-replica.database.svc.cluster.local"
+        - name: POSTGRES_REPLICA_PORT
+          value: "5432"
+        - name: POSTGRES_REPLICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: POSTGRES_REPLICA_PASSWORD
+        
+        # Email configuration
+        - name: SMTP_SERVER
+          value: "smtp.company.internal"
+        - name: SMTP_PORT
+          value: "587"
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: SMTP_PASSWORD
+        - name: ALERT_FROM_EMAIL
+          value: "db-automation@company.com"
+        - name: DBA_EMAIL
+          value: "dba-team@company.com"
+        - name: SRE_EMAIL
+          value: "sre-team@company.com"
+        
+        # AWS configuration for S3 backups
+        - name: AWS_REGION
+          value: "us-west-2"
+        - name: BACKUP_BUCKET
+          value: "company-database-backups"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: AWS_SECRET_ACCESS_KEY
+        
+        # Security
+        - name: DATABASE_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: DATABASE_ENCRYPTION_KEY
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: database-automation-secrets
+              key: SECRET_KEY
+        
+        volumeMounts:
+        - name: config
+          mountPath: /app/db_config.yaml
+          subPath: db_config.yaml
+          readOnly: true
+        - name: logs-storage
+          mountPath: /app/logs
+        - name: reports-storage
+          mountPath: /app/reports
+        - name: backup-storage
+          mountPath: /var/backups
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+            ephemeral-storage: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+            ephemeral-storage: 5Gi
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+        
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+          successThreshold: 1
+      
+      # Sidecar container for log shipping (optional)
+      - name: log-shipper
+        image: fluent/fluent-bit:2.1.4
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: logs-storage
+          mountPath: /app/logs
+          readOnly: true
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      
+      volumes:
+      - name: config
+        configMap:
+          name: database-automation-config
+          defaultMode: 0644
+      - name: logs-storage
+        persistentVolumeClaim:
+          claimName: database-automation-logs-pvc
+      - name: reports-storage
+        persistentVolumeClaim:
+          claimName: database-automation-reports-pvc
+      - name: backup-storage
+        persistentVolumeClaim:
+          claimName: database-automation-backup-pvc
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+          defaultMode: 0644
+      
+      nodeSelector:
+        kubernetes.io/os: linux
+        node-type: worker
+      
+      tolerations:
+      - key: "database-workload"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: database-automation
+              topologyKey: kubernetes.io/hostname
+      
+      terminationGracePeriodSeconds: 60
+      
+      # DNS configuration for better service discovery
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0

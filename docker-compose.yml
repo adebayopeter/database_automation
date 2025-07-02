@@ -1,0 +1,208 @@
+version: '3.8'
+
+services:
+  # Database Automation Suite
+  db-automation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE}
+        VERSION: ${VERSION}
+        VCS_REF: ${VCS_REF}
+    container_name: database-automation
+    hostname: db-automation
+    restart: unless-stopped
+    ports:
+      - "${AUTOMATION_PORT}"
+    volumes:
+      # Configuration
+      - ./db_config.yaml:/app/db_config.yaml:ro
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      # Backup storage
+      - backup-data:/app/backups
+      # Optional: Custom scripts
+      - ./scripts:/app/scripts:ro
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL}
+      - PYTHONPATH=/app
+    env_file:
+      - .env
+    networks:
+      - automation-network
+    depends_on:
+      - postgres-db
+      - prometheus
+    healthcheck:
+      test: ["CMD", "/app/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.database-automation.service=automation"
+      - "com.database-automation.version=${VERSION}"
+
+  # Test PostgreSQL Database
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: test-postgres
+    hostname: postgres-test
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT}"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - automation-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "com.database-automation.service=test-database"
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT}"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus-rules.yml:/etc/prometheus/rules/prometheus-rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - automation-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.database-automation.service=monitoring"
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    hostname: grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT}"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - automation-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.database-automation.service=dashboard"
+
+  # Redis for Caching (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    hostname: redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks:
+      - automation-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.database-automation.service=cache"
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    hostname: nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT}"
+      - "${NGINX_HTTPS_PORT}"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - automation-network
+    depends_on:
+      - db-automation
+      - grafana
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.database-automation.service=proxy"
+
+networks:
+  automation-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+    driver: local
+    labels:
+      - "com.database-automation.volume=postgres-data"
+  
+  backup-data:
+    driver: local
+    labels:
+      - "com.database-automation.volume=backup-data"
+  
+  prometheus-data:
+    driver: local
+    labels:
+      - "com.database-automation.volume=prometheus-data"
+  
+  grafana-data:
+    driver: local
+    labels:
+      - "com.database-automation.volume=grafana-data"
+  
+  redis-data:
+    driver: local
+    labels:
+      - "com.database-automation.volume=redis-data"

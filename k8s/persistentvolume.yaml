@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: database-automation-backup-pv
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: backup-storage
+spec:
+  capacity:
+    storage: 100Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: fast-ssd
+  hostPath:
+    path: /mnt/database-backups
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-automation-backup-pvc
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: backup-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: database-automation-logs-pv
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: logs-storage
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /mnt/database-automation-logs
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-automation-logs-pvc
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: logs-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: database-automation-reports-pv
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: reports-storage
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  hostPath:
+    path: /mnt/database-automation-reports
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-automation-reports-pvc
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: database-automation-suite
+    type: reports-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard

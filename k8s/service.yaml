@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-automation-service
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: database-automation-suite
+    app.kubernetes.io/managed-by: kubernetes
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: automation
+
+---
+# Headless service for StatefulSet (if using StatefulSet instead of Deployment)
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-automation-headless
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: headless-service
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  clusterIP: None
+  ports:
+  - name: metrics
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: automation
+
+---
+# External LoadBalancer service (optional, for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-automation-external
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: external-service
+    app.kubernetes.io/part-of: database-automation-suite
+  annotations:
+    # Cloud provider specific annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+    # For Azure
+    # service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    # For GCP
+    # cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+  - 10.0.0.0/8      # Internal corporate network
+  - 172.16.0.0/12   # Private network
+  - 192.168.0.0/16  # Local network
+  ports:
+  - name: metrics
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: automation
+
+---
+# Service Monitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: database-automation-monitor
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: database-automation-suite
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: database-automation
+      app.kubernetes.io/component: service
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'go_.*'
+      action: drop
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace

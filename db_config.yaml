@@ -1,0 +1,119 @@
+# Database Automation Configuration
+# db_config.yaml
+
+databases:
+  postgres_primary:
+    host: "${POSTGRES_HOST}"
+    port: ${POSTGRES_PORT}
+    database: "${POSTGRES_DB}"
+    username: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    db_type: "postgresql"
+    connection_pool_size: 10
+    ssl_mode: "prefer"
+    connect_timeout: 30
+    enabled: "${POSTGRES_ENABLED:-true}"
+
+  postgres_replica:
+    host: "${POSTGRES_REPLICA_HOST}"
+    port: ${POSTGRES_PORT}
+    database: "${POSTGRES_REPLICA_DB}"
+    username: "${POSTGRES_REPLICA_USER}"
+    password: "${POSTGRES_REPLICA_PASSWORD}"
+    db_type: "postgresql"
+    connection_pool_size: 5
+    ssl_mode: "prefer"
+    connect_timeout: 30
+    enabled: "${POSTGRES_ENABLED:-true}"
+
+  sqlserver_primary:
+    host: "${SQLSERVER_HOST:-localhost}"
+    port: ${SQLSERVER_PORT:-1433}
+    database: "${SQLSERVER_DB:-master}"
+    username: "${SQLSERVER_USER:-sa}"
+    password: "${SQLSERVER_PASSWORD}"
+    db_type: "sqlserver"
+    connection_pool_size: 10
+    connect_timeout: 30
+    enabled: "${SQL_SERVER_ENABLED:-false}"
+
+monitoring:
+  check_interval: 300  # seconds
+  alert_thresholds:
+    cpu_usage: 80
+    memory_usage: 85
+    disk_usage: 90
+    connection_count: 100
+    query_duration_minutes: 5
+    deadlock_count: 5
+
+  email_alerts:
+    enabled: true
+    smtp_server: "${SMTP_SERVER}"
+    smtp_port: ${SMTP_PORT}
+    from_email: "${ALERT_FROM_EMAIL}"
+    alert_recipients:
+      - "${DBA_EMAIL}"
+      - "${SRE_EMAIL}"
+
+backup:
+  schedule: "0 2 * * *"  # Daily at 2 AM (cron format)
+  retention_days: ${BACKUP_RETENTION_DAYS:-7}
+  backup_path: "${BACKUP_PATH:-/tmp/database_backups}"
+  compression: true
+  parallel_jobs: 2
+
+  backup_types:
+    full: "0 2 * * 0"    # Weekly full backup on Sunday
+    differential: "0 2 * * 1-6"  # Daily differential Mon-Sat
+
+  remote_storage:
+    enabled: false
+    type: "s3"  # s3, azure, gcp
+    bucket: "${BACKUP_BUCKET:-database-backups}"
+    region: "${AWS_REGION:-us-west-2}"
+
+performance:
+  auto_vacuum:
+    enabled: true
+    scale_factor: 0.2
+    threshold: 50
+
+  index_maintenance:
+    rebuild_threshold: 30  # fragmentation percentage
+    reorganize_threshold: 10
+
+  statistics_update:
+    auto_update: true
+    sample_percent: 10
+
+security:
+  connection_encryption: true
+  audit_logging: true
+  failed_login_threshold: 5
+  password_policy:
+    min_length: 12
+    require_special_chars: true
+    expire_days: 90
+
+high_availability:
+  replication:
+    enabled: true
+    type: "streaming"  # streaming, logical
+    synchronous: false
+
+  failover:
+    auto_failover: false
+    health_check_interval: 30
+    failure_threshold: 3
+
+kubernetes:
+  enabled: false
+  namespace: "database"
+  storage_class: "fast-ssd"
+  resource_limits:
+    cpu: "2000m"
+    memory: "4Gi"
+  resource_requests:
+    cpu: "1000m"
+    memory: "2Gi"

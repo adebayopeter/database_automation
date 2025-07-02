@@ -1,0 +1,187 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: database-automation-ingress
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: database-automation-suite
+  annotations:
+    # Ingress controller specific annotations
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    
+    # SSL/TLS configuration
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
+    
+    # Rate limiting
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    
+    # Authentication (if using external auth)
+    # nginx.ingress.kubernetes.io/auth-url: "http://auth-service.auth.svc.cluster.local/auth"
+    # nginx.ingress.kubernetes.io/auth-signin: "https://auth.company.com/signin"
+    
+    # CORS configuration
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://monitoring.company.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    
+    # Connection and timeout settings
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    
+    # Load balancing
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    
+spec:
+  tls:
+  - hosts:
+    - db-automation.company.com
+    - metrics.db-automation.company.com
+    secretName: database-automation-tls
+  
+  rules:
+  - host: db-automation.company.com
+    http:
+      paths:
+      - path: /metrics
+        pathType: Prefix
+        backend:
+          service:
+            name: database-automation-service
+            port:
+              number: 8000
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: database-automation-service
+            port:
+              number: 8000
+      - path: /status
+        pathType: Prefix
+        backend:
+          service:
+            name: database-automation-service
+            port:
+              number: 8000
+
+  - host: metrics.db-automation.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: database-automation-service
+            port:
+              number: 8000
+
+---
+# TLS Certificate (if using cert-manager)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: database-automation-cert
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: certificate
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  secretName: database-automation-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - db-automation.company.com
+  - metrics.db-automation.company.com
+
+---
+# Alternative: Using Istio Gateway and VirtualService
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: database-automation-gateway
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: database-automation-tls
+    hosts:
+    - db-automation.company.com
+    - metrics.db-automation.company.com
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - db-automation.company.com
+    - metrics.db-automation.company.com
+    tls:
+      httpsRedirect: true
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: database-automation-vs
+  namespace: database-automation
+  labels:
+    app.kubernetes.io/name: database-automation
+    app.kubernetes.io/component: virtual-service
+    app.kubernetes.io/part-of: database-automation-suite
+spec:
+  hosts:
+  - db-automation.company.com
+  - metrics.db-automation.company.com
+  gateways:
+  - database-automation-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /metrics
+    - uri:
+        prefix: /health
+    - uri:
+        prefix: /status
+    route:
+    - destination:
+        host: database-automation-service
+        port:
+          number: 8000
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+    timeout: 30s
+    headers:
+      response:
+        add:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"

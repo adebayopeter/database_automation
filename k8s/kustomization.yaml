@@ -1,0 +1,99 @@
+# Kustomization file for Database Automation Suite
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: database-automation-suite
+  annotations:
+    config.kubernetes.io/local-config: "true"
+
+# Namespace for all resources
+namespace: database-automation
+
+# Resource files to include
+resources:
+- namespace.yaml
+- serviceaccount.yaml
+- configmap.yaml
+- secret.yaml
+- persistentvolume.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+- networkpolicy.yaml
+- hpa.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/name: database-automation
+  app.kubernetes.io/part-of: database-automation-suite
+  app.kubernetes.io/managed-by: kustomize
+  environment: production
+
+# Common annotations applied to all resources
+commonAnnotations:
+  config.kubernetes.io/origin: "Database Automation Suite"
+  deployment.kubernetes.io/revision: "1"
+
+# Images to replace
+images:
+- name: your-registry/database-automation
+  newTag: 2.0.0
+
+# ConfigMap and Secret generators
+configMapGenerator:
+- name: fluent-bit-config
+  files:
+  - fluent-bit.conf=../monitoring/fluent-bit.conf
+  options:
+    disableNameSuffixHash: true
+
+# Patches for different environments
+patchesStrategicMerge:
+- deployment-patch.yaml
+
+# JSON6902 patches for fine-grained modifications
+patchesJson6902:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: database-automation
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 2
+    - op: add
+      path: /spec/template/metadata/annotations/deployment.kubernetes.io~1config.hash
+      value: ${CONFIG_HASH}
+
+# Replacements for cross-cutting changes
+replacements:
+- source:
+    kind: ConfigMap
+    name: database-automation-config
+    fieldPath: data.METRICS_PORT
+  targets:
+  - select:
+      kind: Service
+      name: database-automation-service
+    fieldPaths:
+    - spec.ports.[name=metrics].port
+    - spec.ports.[name=metrics].targetPort
+
+# Variable definitions
+vars:
+- name: APP_VERSION
+  objref:
+    kind: ConfigMap
+    name: database-automation-config
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.VERSION
+- name: NAMESPACE
+  objref:
+    kind: Namespace
+    name: database-automation
+    apiVersion: v1
+  fieldref:
+    fieldpath: metadata.name

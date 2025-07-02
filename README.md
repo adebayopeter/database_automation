@@ -2,7 +2,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![CI/CD](https://github.com/adebayopeter/database_automation/workflows/CI/badge.svg)](https://github.com/username/database_automation/actions)
+![CI](https://github.com/adebayopeter/database_automation/actions/workflows/ci.yml/badge.svg)
 [![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg)](https://github.com/username/database_automation)
 
 A comprehensive, production-ready database automation framework designed for **PostgreSQL** and **SQL Server** environments. Built for Site Reliability Engineering (SRE) teams, Database Administrators, and DevOps professionals who need robust, scalable database management automation with **Prometheus monitoring** and **Grafana visualization**.
@@ -139,30 +139,30 @@ curl http://localhost:8000/metrics
          └───────────────────────┼───────────────────────│─────┐
                                  │                       │     │
          ┌───────────────────────▼───────────────────────│─────▼──┐
-         │         Database Automation Suite            │        │
-         │  ┌─────────────────────────────────────────┐  │ ┌──────▼──┐
-         │  │        Connection Pool Manager         │  │ │Prometheus│
-         │  └─────────────────────────────────────────┘  │ │ Metrics │
-         │  ┌─────────────────────────────────────────┐  │ │ & Rules │
-         │  │         Health Monitor Engine          │  │ └──────┬──┘
+         │         Database Automation Suite             │        │
+         │  ┌─────────────────────────────────────────┐  │ ┌──────▼── ┐
+         │  │        Connection Pool Manager          │  │ │Prometheus│
+         │  └─────────────────────────────────────────┘  │ │ Metrics  │
+         │  ┌─────────────────────────────────────────┐  │ │ & Rules  │
+         │  │         Health Monitor Engine           │  │ └──────┬── ┘
          │  └─────────────────────────────────────────┘  │        │
          │  ┌─────────────────────────────────────────┐  │        │
-         │  │       Backup & Recovery Engine         │  │        │
+         │  │       Backup & Recovery Engine          │  │        │
          │  └─────────────────────────────────────────┘  │        │
          │  ┌─────────────────────────────────────────┐  │        │
-         │  │      Performance Optimizer             │  │        │
+         │  │      Performance Optimizer              │  │        │
          │  └─────────────────────────────────────────┘  │        │
          │  ┌─────────────────────────────────────────┐  │        │
-         │  │       Prometheus Exporter              │  │        │
+         │  │       Prometheus Exporter               │  │        │
          │  └─────────────────────────────────────────┘  │        │
          └───────────────────────────────────────────────┘        │
-                                 │                               │
+                                 │                                │
          ┌───────────────────────▼───────────────────────────────▼─┐
          │                    Outputs                              │
-         │  • Grafana Dashboards  • Prometheus Alerts             │
-         │  • Email Notifications • Backup Files                  │
-         │  • Health Reports      • Audit Logs                   │
-         │  • Performance Metrics • Query Analytics               │
+         │  • Grafana Dashboards  • Prometheus Alerts              │
+         │  • Email Notifications • Backup Files                   │
+         │  • Health Reports      • Audit Logs                     │
+         │  • Performance Metrics • Query Analytics                │
          └─────────────────────────────────────────────────────────┘
 ```
 
@@ -707,7 +707,7 @@ For questions, issues, or contributions:
 
 - **Issues**: [GitHub Issues](https://github.com/adebayopeter/database_automation/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/adebayopeter/database_automation/discussions)
-- **Email**: [database-automation@example.com](mailto:pekunmi@live.com)
+- **Email**: [pekunmi@live.com](mailto:pekunmi@live.com)
 
 ---
 
